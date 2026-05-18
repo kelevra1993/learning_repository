@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "learning-jax"
+version = "0.1.0"
+description = "Project For Learning Jax"
+authors = ["Your Name <your.email@example.com>"]
+package-mode = false
+
+[tool.poetry.dependencies]
+python = ">=3.12"
+numpy = "^2.4.5"
+jax = {extras = ["cuda13"], version = "^0.10.0"}
+tqdm = "^4.67.3"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
