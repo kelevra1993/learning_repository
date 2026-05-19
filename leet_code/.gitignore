@@ -18,6 +18,9 @@ share/python-wheels/
 *.egg
 MANIFEST
 
+# Openfold weights
+openfold_params/
+openfold_params/*.pt
 
 # Jupyter Notebook
 .ipynb_checkpoints
