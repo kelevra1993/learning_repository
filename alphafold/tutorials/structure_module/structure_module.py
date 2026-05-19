@@ -11,6 +11,8 @@ tutorials_dir = current_dir.parent
 # Add it to the system path
 sys.path.append(str(tutorials_dir))
 
+# sys.path.append(str(tutorials_dir))
+
 from ipa import InvariantPointAttention
 from geometry.geometry import compute_all_atom_coordinates, assemble_4x4_transform, quat_to_3x3_rotation
 from geometry.residue_constants import *
@@ -350,7 +352,7 @@ class StructureModule(nn.Module):
 
         pseudo_beta_positions = final_positions[..., carbon_beta_index, :]
         alpha_positions = final_positions[..., carbon_alpha_index, :]
-        pseudo_beta_positions[F==glycine_index] = alpha_positions[F==glycine_index]
+        pseudo_beta_positions[F == glycine_index] = alpha_positions[F == glycine_index]
 
         ##########################################################################
         #               END OF YOUR CODE                                         #
@@ -387,7 +389,7 @@ class StructureModule(nn.Module):
         z = self.layer_norm_z(z)
         s = self.linear_in(s)
 
-        T = torch.eye(4).broadcast_to((batch_dim + (N_res,4, 4))).to(dtype)
+        T = torch.eye(4).broadcast_to((batch_dim + (N_res, 4, 4))).to(dtype)
 
         for iteration in range(self.n_layer):
             s += self.ipa(s, z, T)

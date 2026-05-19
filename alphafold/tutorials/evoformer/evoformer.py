@@ -11,7 +11,6 @@ tutorials_dir = current_dir.parent
 # Add it to the system path
 sys.path.append(str(tutorials_dir))
 
-from dropout import DropoutRowwise
 from msa_stack import MSARowAttentionWithPairBias, MSAColumnAttention, OuterProductMean, MSATransition
 from pair_stack import PairStack
 

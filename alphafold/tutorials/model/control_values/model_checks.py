@@ -54,7 +54,7 @@ def test_module_shape(module, test_name, control_folder):
     param_shapes = {name: param.shape for name, param in module.named_parameters()}
 
     shapes_path = f'{control_folder}/{test_name}_param_shapes.pt'
-    expected_shapes = torch.load(shapes_path)
+    expected_shapes = torch.load(shapes_path,weights_only=True)
 
     keys_in_dict1_only = set(param_shapes.keys()) - set(expected_shapes.keys())
     keys_in_dict2_only = set(expected_shapes.keys()) - set(param_shapes.keys())
@@ -131,12 +131,12 @@ def test_module_method(module, test_name, input_names, output_names, control_fol
 
     out_file_names = [f'{control_folder}/{test_name}_{out_name}.pt' for out_name in output_names]
     for out, out_file_name, out_name in zip(non_batched_out, out_file_names, output_names):
-        expected_out = torch.load(out_file_name)
+        expected_out = torch.load(out_file_name,weights_only=True)
         assert torch.allclose(out, expected_out), f'Problem with output {out_name} in test {test_name} in non-batched check.'
 
     if include_batched:
         for out, out_file_name, out_name in zip(batched_out, out_file_names, output_names):
-            expected_out = torch.load(out_file_name)
+            expected_out = torch.load(out_file_name,weights_only=True)
             expected_out_batch_shape = (N,) + expected_out.shape
             expected_out = expected_out.unsqueeze(0).broadcast_to(expected_out_batch_shape)
 

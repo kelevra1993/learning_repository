@@ -32,7 +32,7 @@ class InputEmbedder(nn.Module):
         super().__init__()
         self.tf_dim = tf_dim
         self.vbins = vbins
-        print(f"self.vbins is equal to {self.vbins}")
+        # print(f"self.vbins is equal to {self.vbins}")
 
         self.linear_tf_z_i = nn.Linear(in_features=self.tf_dim, out_features=c_z)
         self.linear_tf_z_j = nn.Linear(in_features=self.tf_dim, out_features=c_z)
@@ -121,10 +121,10 @@ class InputEmbedder(nn.Module):
         c = a.unsqueeze(-2) + b.unsqueeze(-3)
         relative_position_embedding = self.relpos(residue_index=residue_index)
         z = c + relative_position_embedding
-        print_shape(name="Matrix A", tensor=a)
-        print_shape(name="Matrix B", tensor=b)
-        print_shape(name="Matrix C", tensor=c)
-        print_shape(name="Relative Position Embedding", tensor=relative_position_embedding)
+        # print_shape(name="Matrix A", tensor=a)
+        # print_shape(name="Matrix B", tensor=b)
+        # print_shape(name="Matrix C", tensor=c)
+        # print_shape(name="Relative Position Embedding", tensor=relative_position_embedding)
 
         target_feat_embedidng_msa = self.linear_tf_m(target_feat).unsqueeze(-3)
         msa_feat_embedding_msa = self.linear_msa_m(msa_feat)

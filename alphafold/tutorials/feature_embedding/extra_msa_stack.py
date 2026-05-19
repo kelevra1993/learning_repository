@@ -62,8 +62,6 @@ class ExtraMsaEmbedder(nn.Module):
         """
 
         e = batch['extra_msa_feat']
-        out = None
-
         ##########################################################################
         # TODO: Pass extra_msa_feat through the linear layer defined in init.    #
         ##########################################################################

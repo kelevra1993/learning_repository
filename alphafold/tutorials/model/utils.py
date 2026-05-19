@@ -1,9 +1,40 @@
+import os
+import sys
+from pathlib import Path
+
+# Dynamically find the 'tutorials' directory (the parent of 05_evoformer)
+current_dir = Path(os.getcwd())
+tutorials_dir = current_dir.parent
+
+# Add it to the system path
+sys.path.append(str(tutorials_dir))
+
 import torch
 import modelcif
 import modelcif.model
 import modelcif.dumper
 import io
 from geometry.residue_constants import atom_types
+
+import numpy as np
+import torch
+
+
+class Stop(Exception):
+    def _render_traceback_(self):
+        pass
+
+
+torch.set_printoptions(linewidth=200, threshold=10_000)
+np.set_printoptions(linewidth=200, threshold=np.inf)
+
+
+def print_tensor_list(tensor, round=4):
+    print(np.round(tensor.tolist(), round))
+
+
+def print_shape(name, tensor):
+    print(f"Tensor {name} Is Of Shape : {list(tensor.shape)}")
 
 def parameter_renaming(weights):
     name_map = {
