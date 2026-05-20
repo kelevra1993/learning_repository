@@ -4,6 +4,15 @@ import math
 import numpy as np
 from torch import nn
 from functools import partial
+import sys
+import os
+from pathlib import Path
+
+parent_directory = Path(os.getcwd()).parent
+sys.path.append(str(parent_directory))
+for folder in ["attention", "feature_embedding", "geometry", "model", "tensor_introduction", "evoformer",
+               "feature_extraction", "machine_learning", "structure_module", "tensor_utilities"]:
+    sys.path.append(str(parent_directory / folder))
 
 
 def print_shape(name, tensor):
@@ -149,6 +158,7 @@ def initial_data_from_seqs(seqs):
     #      amino acid distribution.                                          #
     ##########################################################################
 
+    # todo rename temporary count to temporary deletion counter
     deletion_count_matrix = []
     unique_sequences = []
 
@@ -165,22 +175,29 @@ def initial_data_from_seqs(seqs):
             updated_sequence += amino_acid
             sequence_deletion_list.append(temporary_count)
             temporary_count = 0
-
+        # Todo verify the shape of the deletion matrix
+        # todo for updated sequence without we could have just removed all lower values
+        # todo test out gaps
+        # todo here why use "not in" ? Could tend to be confusing ?
         if updated_sequence not in unique_sequences:
             unique_sequences.append(updated_sequence)
             deletion_count_matrix.append(sequence_deletion_list)
 
+    # todo to match the device and the dtype provided
     # Turn deletion count matrix into a tensor
     deletion_count_matrix = torch.tensor(deletion_count_matrix).to(torch.float32)
 
     unique_sequences_matrix = [onehot_encode_aa_type(seq, include_gap_token=True) for seq in unique_sequences]
     unique_seqs = torch.stack(unique_sequences_matrix, dim=0).to(torch.float32)
 
+    # todo do we need to have it broadcasted already ? yes
+    # todo rather use dim=-3 for batch consideration
     aa_distribution = unique_seqs.mean(dim=0)
 
     ##########################################################################
     # END OF YOUR CODE                                                       #
     ##########################################################################
+    # Todo Add all these elements to the class, will be easier later
 
     return {'msa_aatype': unique_seqs, 'msa_deletion_count': deletion_count_matrix, 'aa_distribution': aa_distribution}
 
@@ -208,6 +225,9 @@ def select_cluster_centers(features, max_msa_clusters=512, seed=None):
     MSA_FEATURE_NAMES = ['msa_aatype', 'msa_deletion_count']
     max_msa_clusters = min(max_msa_clusters, N_seq)
 
+    print(f"User Provided The Following Seed :: {seed}")
+
+    # TODO Try to understand this seed
     gen = None
     if seed is not None:
         gen = torch.Generator(features['msa_aatype'].device)
@@ -303,6 +323,8 @@ def mask_cluster_centers(features, mask_probability=0.15, seed=None):
     random_mask = torch.rand((N_clust, N_res), generator=gen)
     indices_to_change = random_mask < mask_probability
 
+    # todo add type and device
+    # uniform_replacement = torch.tensor([1 / 20] * 20 + [0, 0]) * odds['uniform_replacement']
     uniform_replacement = torch.tensor([1 / 20 if index < 20 else 0 for index in range(22)]).to(torch.float) * odds[
         'uniform_replacement']
     replacement_from_distribution = features["aa_distribution"] * odds['replacement_from_distribution']
@@ -310,18 +332,39 @@ def mask_cluster_centers(features, mask_probability=0.15, seed=None):
     masked_out = torch.ones((N_clust, N_res, 1)) * odds['masked_out']
 
     # Summing initial categories up
+    # todo note that this broadcast to replacement from distribution
     categories_with_mask_token = uniform_replacement.reshape((1, 22)) + replacement_from_distribution
     categories_with_mask_token = categories_with_mask_token.unsqueeze(0) + no_replacement
-    categories_with_mask_token = torch.cat(tensors=(categories_with_mask_token, masked_out), dim=-1)
 
+    categories_with_mask_token = torch.cat(tensors=(categories_with_mask_token, masked_out), dim=-1)
+    # todo reconsider this flatten to the proposed reshaped that is actually more readible
+    # categories_with_mask_token = categories_with_mask_token.reshape(-1, N_aa_categories)
+    # Categories takes and input of 2 dimensions and selects the last dimension
     flattened_distribution = torch.flatten(input=categories_with_mask_token, start_dim=0, end_dim=1)
+
+    # Would give out some two dimensional matrix with "selected indices" and we would then reshape them
+    # So probably not probabilitiesbut just indices
+    """
+    ----> Seems to be a more readable implementation
+    replace_with = torch.distributions.Categorical(categories_with_mask_token).sample()
+    replace_with = nn.functional.one_hot(replace_with, num_classes=N_aa_categories)
+    replace_with = replace_with.reshape(N_clust, N_res, N_aa_categories)
+    replace_with = replace_with.float()
+    """
+
     updated_amino_acids_probabilities = torch.distributions.Categorical(flattened_distribution).sample().reshape(
         (N_clust, N_res))
+    sample = torch.distributions.Categorical(flattened_distribution).sample()
+    print_shape(name="Selected Indices", tensor=sample)
+    print_tensor_list(sample[:20])
 
     features["true_msa_aatype"] = features["msa_aatype"]
     features["msa_aatype"] = torch.cat(tensors=(features["msa_aatype"], torch.zeros(N_clust, N_res, 1).to(torch.float)),
                                        dim=-1)
 
+    print_shape(name="Indices To Change", tensor=indices_to_change)
+    print_tensor_list(indices_to_change[:10, :10].int())
+    # Or maybe just keep my implementation and properly rename variables
     features["msa_aatype"][indices_to_change] = torch.nn.functional.one_hot(
         updated_amino_acids_probabilities[indices_to_change], 23).to(torch.float)
 
@@ -384,13 +427,19 @@ def cluster_assignment(features):
     #       the cluster center itself).  Ensure you set the `minlength` parameter appropriately.
     ##########################################################################
 
+    # TODO Rename this to sliced : Better for understanding
     cleared_msa_aatype = features["msa_aatype"][..., :21]
-    cleared_extra_msa_aatype = features["extra_msa_aatype"][..., : 21].unsqueeze(dim=1)
-    agreement_msa_aatypes = cleared_extra_msa_aatype * cleared_msa_aatype
-    agreement_score = torch.sum(input=agreement_msa_aatypes, dim=(-2, -1))
+    cleared_extra_msa_aatype = features["extra_msa_aatype"][..., : 21]
+    agreement_score = torch.einsum("...abc, ...dbc -> ad", cleared_extra_msa_aatype, cleared_msa_aatype)
+    print_shape(name="Agreement Score", tensor=agreement_score)
+    # cleared_extra_msa_aatype = features["extra_msa_aatype"][..., : 21].unsqueeze(dim=1)
+    # agreement_msa_aatypes = cleared_extra_msa_aatype * cleared_msa_aatype
+    # agreement_score = torch.sum(input=agreement_msa_aatypes, dim=(-2, -1))
+    # print_shape(name="Agreement Score", tensor=agreement_score)
     assignments = torch.argmax(agreement_score, dim=-1)
     assignments_count = torch.bincount(assignments, minlength=N_clust)
-
+    # print_shape(name="Assignment Counts", tensor=assignments_count)
+    # print_tensor_list(assignments_count[:100])
     features['cluster_assignment'] = assignments
     features['cluster_assignment_counts'] = assignments_count
     # print_shape(name="Original MSA Tensor", tensor=features["msa_aatype"])
@@ -419,6 +468,7 @@ def cluster_assignment(features):
 
 def cluster_average(feature, extra_feature, cluster_assignment, cluster_assignment_count):
     """
+    # todo : Note only applied for deletion and profile ????
     Calculates the average representation of each cluster center by aggregating features 
     from the assigned extra sequences.
 
@@ -458,6 +508,7 @@ def cluster_average(feature, extra_feature, cluster_assignment, cluster_assignme
         cluster_assignment_count = cluster_assignment_count.unsqueeze(dim=-1)
 
     cluster_assignment = torch.broadcast_to(cluster_assignment, size=extra_feature.shape)
+    # print("We chose not to brodcast the count because it would still have been done implicitly")
     cluster_assignment_count = torch.broadcast_to(cluster_assignment_count, size=feature.shape)
 
     accumulated_features = torch.scatter_add(input=feature, src=extra_feature, dim=0, index=cluster_assignment)
@@ -524,22 +575,27 @@ def summarize_clusters(features):
     # print_tensor_list(deletion_count_average[:10, :20], round=3)
     deletion_count_average = 2 / torch.pi * torch.arctan(deletion_count_average / 3)
     features["cluster_deletion_mean"] = deletion_count_average
+
     # print(50*"-")
     # print_tensor_list(deletion_count_average[:10,:20], round=3)
     # print(deletion_count_average.shape)
     # # Replace "pass" statement with your code
     # pass
 
-    extra_msa_aatype_shape = list(features["extra_msa_aatype"].shape)
-    extra_msa_aatype_shape[-1] = 1
-    zero_padding = torch.zeros(tuple(extra_msa_aatype_shape))
-    padded_extra_msa_aatype = torch.cat(tensors=(features["extra_msa_aatype"], zero_padding), dim=-1)
-
+    # TODO Could have been padded otherwise, you have to use torch.nn.pad(), easier to understand and use.
+    # extra_msa_aatype_shape = list(features["extra_msa_aatype"].shape)
+    # extra_msa_aatype_shape[-1] = 1
+    # zero_padding = torch.zeros(tuple(extra_msa_aatype_shape))
+    # padded_extra_msa_aatype = torch.cat(tensors=(features["extra_msa_aatype"], zero_padding), dim=-1)
+    #
+    # cluster_profile = cluster_average(feature=features["msa_aatype"],
+    #                                   extra_feature=padded_extra_msa_aatype,
+    #                                   cluster_assignment=features["cluster_assignment"],
+    #                                   cluster_assignment_count=features["cluster_assignment_counts"])
     cluster_profile = cluster_average(feature=features["msa_aatype"],
-                                      extra_feature=padded_extra_msa_aatype,
+                                      extra_feature=nn.functional.pad(features["extra_msa_aatype"], (0, 1), value=0),
                                       cluster_assignment=features["cluster_assignment"],
                                       cluster_assignment_count=features["cluster_assignment_counts"])
-
     features["cluster_profile"] = cluster_profile
 
     ##########################################################################
@@ -589,6 +645,7 @@ def crop_extra_msa(features, max_extra_msa_count=5120, seed=None):
 
     for key in list(features.keys()):
         if "extra" in key:
+            print(key)
             # print_shape(name=f"Before Clipping {key}",tensor=features[key])
             features[key] = features[key][sliced_shuffled_indices]
             # print_shape(name=f"After Clipping {key}", tensor=features[key])
@@ -647,22 +704,33 @@ def calculate_msa_feat(features):
     # print(features["msa_deletion_count"][3])
     # return None
     # Concatenation of the cluster has deletion feature
+    print_shape(name='features["msa_aatype"]',tensor=features["msa_aatype"])
+    print_shape(name='features["cluster_has_deletion"]',tensor=features["cluster_has_deletion"])
+    print_shape(name='features["cluster_deletion_value"]',tensor=features["cluster_deletion_value"])
+    print_shape(name='features["cluster_profile"]',tensor=features["cluster_profile"])
+    print_shape(name='features["cluster_deletion_mean"]',tensor=features["cluster_deletion_mean"])
 
-    features["msa_feat"] = features["msa_aatype"]
-    # print(features["msa_feat"].shape)
-    for key in ["cluster_has_deletion", "cluster_deletion_value", "cluster_profile", "cluster_deletion_mean"]:
-        # print_shape(name="MSA Feature", tensor=features["msa_feat"])
-        remaining_dimension = features["msa_aatype"].ndim - features[key].ndim
-        for _ in range(remaining_dimension):
-            features[key] = features[key].unsqueeze(dim=-1)
-        # print_shape(name=f"{key} Feature Being Added", tensor=features[key])
-        if key in ["cluster_has_deletion", "cluster_deletion_value"]:
-            data_to_concatenate = torch.broadcast_to(features[key],
-                                                     size=tuple(tuple(features["msa_aatype"].shape[:2]) + (1,)))
-        else:
-            data_to_concatenate = features[key]
-        # print(data_to_concatenate.shape)
-        features["msa_feat"] = torch.cat(tensors=[features["msa_feat"], data_to_concatenate], dim=-1)
+    msa_feat = torch.cat((features["msa_aatype"],
+                          features["cluster_has_deletion"],
+                          features["cluster_deletion_value"],
+                          features["cluster_profile"],
+                          features["cluster_deletion_mean"].unsqueeze(-1)), dim=-1)
+
+    # features["msa_feat"] = features["msa_aatype"]
+    # # print(features["msa_feat"].shape)
+    # for key in ["cluster_has_deletion", "cluster_deletion_value", "cluster_profile", "cluster_deletion_mean"]:
+    #     # print_shape(name="MSA Feature", tensor=features["msa_feat"])
+    #     remaining_dimension = features["msa_aatype"].ndim - features[key].ndim
+    #     for _ in range(remaining_dimension):
+    #         features[key] = features[key].unsqueeze(dim=-1)
+    #     # print_shape(name=f"{key} Feature Being Added", tensor=features[key])
+    #     if key in ["cluster_has_deletion", "cluster_deletion_value"]:
+    #         data_to_concatenate = torch.broadcast_to(features[key],
+    #                                                  size=tuple(tuple(features["msa_aatype"].shape[:2]) + (1,)))
+    #     else:
+    #         data_to_concatenate = features[key]
+    #     # print(data_to_concatenate.shape)
+    #     features["msa_feat"] = torch.cat(tensors=[features["msa_feat"], data_to_concatenate], dim=-1)
         # print(100 * '-')
     # features["msa_feat"] = torch.cat(tensors=[
     #     features["msa_aatype"],
@@ -683,12 +751,12 @@ def calculate_msa_feat(features):
     # print_shape(name="cluster_deletion_value", tensor=features["cluster_deletion_value"])
     # print_shape(name="cluster_profile", tensor=features["cluster_profile"])
     # print_shape(name="cluster_deletion_mean", tensor=features["cluster_deletion_mean"])
-    print_shape(name="MSA Feature", tensor=features["msa_feat"])
-
+    print_shape(name="MSA Feature", tensor=msa_feat)
+    # raise Stop
     ##########################################################################
     # END OF YOUR CODE                                                       #
     ##########################################################################
-    msa_feat = features["msa_feat"]
+    # msa_feat = features["msa_feat"]
     return msa_feat
 
 
@@ -708,27 +776,36 @@ def calculate_extra_msa_feat(features):
     N_extra, N_res = features['extra_msa_aatype'].shape[:2]
     extra_msa_feat = None
 
-    features["extra_msa_deletion_value"] = (
-            2 / torch.pi * torch.arctan(features["extra_msa_deletion_count"] / 3)).unsqueeze(
-        dim=-1)
+    features["extra_msa_deletion_value"] = (2 / torch.pi * torch.arctan(features["extra_msa_deletion_count"] / 3)).unsqueeze(dim=-1)
     features["extra_msa_has_deletion"] = (features["extra_msa_deletion_value"] > 0)
 
     # print_shape(name="Extra MSA AATYPE", tensor=features["extra_msa_aatype"])
     padded_tensor = torch.nn.functional.pad(features["extra_msa_aatype"], (0, 1), value=0)
     # print_shape(name="Padded Extra MSA AATYPE", tensor=padded_tensor)
+    extra_msa_feat = torch.cat(tensors=[padded_tensor, features["extra_msa_has_deletion"],features["extra_msa_deletion_value"]], dim=-1)
 
-    features["extra_msa_feat"] = padded_tensor
-    # print(features["msa_feat"].shape)
-    for key in ["extra_msa_has_deletion", "extra_msa_deletion_value"]:
-        remaining_dimension = features["extra_msa_feat"].ndim - features[key].ndim
-        for _ in range(remaining_dimension):
-            features[key] = features[key].unsqueeze(dim=-1)
+    # Easier implementation ?
+    """padding = torch.zeros((N_extra, N_res, 1))
+    extra_msa = torch.cat((features['extra_msa_aatype'], padding), dim=-1)
+    extra_msa_has_deletion = (features['extra_msa_deletion_count'] > 0).float().unsqueeze(-1)
+    extra_msa_deletion_value = 2 / torch.pi * torch.arctan(features['extra_msa_deletion_count'] / 3)
+    extra_msa_deletion_value = extra_msa_deletion_value.unsqueeze(-1)
 
-        data_to_concatenate = torch.broadcast_to(features[key],
-                                                 size=tuple(tuple(features["extra_msa_aatype"].shape[:2]) + (1,)))
+    extra_msa_feat = torch.cat((extra_msa, extra_msa_has_deletion, extra_msa_deletion_value), dim=-1)"""
 
-        # print(data_to_concatenate.shape)
-        features["extra_msa_feat"] = torch.cat(tensors=[features["extra_msa_feat"], data_to_concatenate], dim=-1)
+
+    # features["extra_msa_feat"] = padded_tensor
+    # # print(features["msa_feat"].shape)
+    # for key in ["extra_msa_has_deletion", "extra_msa_deletion_value"]:
+    #     remaining_dimension = features["extra_msa_feat"].ndim - features[key].ndim
+    #     for _ in range(remaining_dimension):
+    #         features[key] = features[key].unsqueeze(dim=-1)
+    #
+    #     data_to_concatenate = torch.broadcast_to(features[key],
+    #                                              size=tuple(tuple(features["extra_msa_aatype"].shape[:2]) + (1,)))
+    #
+    #     # print(data_to_concatenate.shape)
+    #     features["extra_msa_feat"] = torch.cat(tensors=[features["extra_msa_feat"], data_to_concatenate], dim=-1)
     ##########################################################################
     # TODO:
     # 1. **Prepare Features:**
@@ -747,7 +824,7 @@ def calculate_extra_msa_feat(features):
     #          - `extra_msa_deletion_value`
     ##########################################################################
 
-    extra_msa_feat = features["extra_msa_feat"]
+    # extra_msa_feat = features["extra_msa_feat"]
     ##########################################################################
     # END OF YOUR CODE                                                       #
     ##########################################################################
@@ -793,13 +870,11 @@ def create_features_from_a3m(file_name, seed=None):
         partial(mask_cluster_centers, seed=mask_clusters_seed),
         partial(cluster_assignment),
         partial(summarize_clusters),
-        partial(crop_extra_msa, seed=crop_extra_seed),]
+        partial(crop_extra_msa, seed=crop_extra_seed), ]
 
     # Run sequentially: update 'features' at each step
     for f in functions_to_run:
         features = f(features)
-
-
 
     first_sequence = sequences[0]
     target_feat = onehot_encode_aa_type(seq=first_sequence, include_gap_token=False)
